@@ -1,0 +1,468 @@
+{
+  "budgets": [
+    64,
+    96,
+    128
+  ],
+  "depths": [
+    0.1,
+    0.25,
+    0.5,
+    0.75,
+    0.9
+  ],
+  "results": {
+    "no_eviction": {
+      "64": {
+        "10%": {
+          "exact": 1,
+          "fuzzy": 1,
+          "f1": 0.8235,
+          "combined": 1,
+          "text": "DELTA-7-ZEPHYR."
+        },
+        "25%": {
+          "exact": 1,
+          "fuzzy": 1,
+          "f1": 0.8235,
+          "combined": 1,
+          "text": "DELTA-7-ZEPHYR."
+        },
+        "50%": {
+          "exact": 1,
+          "fuzzy": 1,
+          "f1": 0.8235,
+          "combined": 1,
+          "text": "DELTA-7-ZEPHYR."
+        },
+        "75%": {
+          "exact": 1,
+          "fuzzy": 1,
+          "f1": 0.8235,
+          "combined": 1,
+          "text": "DELTA-7-ZEPHYR."
+        },
+        "90%": {
+          "exact": 1,
+          "fuzzy": 1,
+          "f1": 0.8235,
+          "combined": 1,
+          "text": "DELTA-7-ZEPHYR."
+        }
+      },
+      "96": {
+        "10%": {
+          "exact": 1,
+          "fuzzy": 1,
+          "f1": 0.8235,
+          "combined": 1,
+          "text": "DELTA-7-ZEPHYR."
+        },
+        "25%": {
+          "exact": 1,
+          "fuzzy": 1,
+          "f1": 0.8235,
+          "combined": 1,
+          "text": "DELTA-7-ZEPHYR."
+        },
+        "50%": {
+          "exact": 1,
+          "fuzzy": 1,
+          "f1": 0.8235,
+          "combined": 1,
+          "text": "DELTA-7-ZEPHYR."
+        },
+        "75%": {
+          "exact": 1,
+          "fuzzy": 1,
+          "f1": 0.8235,
+          "combined": 1,
+          "text": "DELTA-7-ZEPHYR."
+        },
+        "90%": {
+          "exact": 1,
+          "fuzzy": 1,
+          "f1": 0.8235,
+          "combined": 1,
+          "text": "DELTA-7-ZEPHYR."
+        }
+      },
+      "128": {
+        "10%": {
+          "exact": 1,
+          "fuzzy": 1,
+          "f1": 0.8235,
+          "combined": 1,
+          "text": "DELTA-7-ZEPHYR."
+        },
+        "25%": {
+          "exact": 1,
+          "fuzzy": 1,
+          "f1": 0.8235,
+          "combined": 1,
+          "text": "DELTA-7-ZEPHYR."
+        },
+        "50%": {
+          "exact": 1,
+          "fuzzy": 1,
+          "f1": 0.8235,
+          "combined": 1,
+          "text": "DELTA-7-ZEPHYR."
+        },
+        "75%": {
+          "exact": 1,
+          "fuzzy": 1,
+          "f1": 0.8235,
+          "combined": 1,
+          "text": "DELTA-7-ZEPHYR."
+        },
+        "90%": {
+          "exact": 1,
+          "fuzzy": 1,
+          "f1": 0.8235,
+          "combined": 1,
+          "text": "DELTA-7-ZEPHYR."
+        }
+      }
+    },
+    "sliding_window": {
+      "64": {
+        "10%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.0,
+          "combined": 0,
+          "text": "DEL"
+        },
+        "25%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.0,
+          "combined": 0,
+          "text": "DEL"
+        },
+        "50%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.0,
+          "combined": 0,
+          "text": "DEL"
+        },
+        "75%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.0,
+          "combined": 0,
+          "text": "DEL"
+        },
+        "90%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.0,
+          "combined": 0,
+          "text": "DEL"
+        }
+      },
+      "96": {
+        "10%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.0,
+          "combined": 0,
+          "text": "DEL"
+        },
+        "25%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.0,
+          "combined": 0,
+          "text": "DEL Search engines, streaming media, streaming media, streaming media, streaming media, streaming media, streaming"
+        },
+        "50%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.0,
+          "combined": 0,
+          "text": "DEL Search engines, streaming media, streaming media, streaming media, streaming media, streaming media, streaming"
+        },
+        "75%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.0,
+          "combined": 0,
+          "text": "DEL"
+        },
+        "90%": {
+          "exact": 1,
+          "fuzzy": 1,
+          "f1": 0.8235,
+          "combined": 1,
+          "text": "DELTA-7-ZEPHYR."
+        }
+      },
+      "128": {
+        "10%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.0,
+          "combined": 0,
+          "text": "DEL"
+        },
+        "25%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.0,
+          "combined": 0,
+          "text": "DEL Search engines, streaming media, streaming media, streaming media, streaming media, streaming media, streaming"
+        },
+        "50%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.0,
+          "combined": 0,
+          "text": "DEL Search engines, streaming media, streaming media, streaming media, streaming media, streaming media, streaming"
+        },
+        "75%": {
+          "exact": 1,
+          "fuzzy": 0,
+          "f1": 0.5,
+          "combined": 1,
+          "text": "DELTA-7-ZEPHYR.  population of people who could direct a machine to useful"
+        },
+        "90%": {
+          "exact": 1,
+          "fuzzy": 0,
+          "f1": 0.5,
+          "combined": 1,
+          "text": "DELTA-7-ZEPHYR.  knowledge is stored and shared across the entire planet."
+        }
+      }
+    },
+    "streaming_llm": {
+      "64": {
+        "10%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.0,
+          "combined": 0,
+          "text": "DEL"
+        },
+        "25%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.0,
+          "combined": 0,
+          "text": "DEL"
+        },
+        "50%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.0,
+          "combined": 0,
+          "text": "DEL"
+        },
+        "75%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.0,
+          "combined": 0,
+          "text": "DEL"
+        },
+        "90%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.0,
+          "combined": 0,
+          "text": "DEL"
+        }
+      },
+      "96": {
+        "10%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.0,
+          "combined": 0,
+          "text": "DEL"
+        },
+        "25%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.0,
+          "combined": 0,
+          "text": "DEL"
+        },
+        "50%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.0,
+          "combined": 0,
+          "text": "DEL"
+        },
+        "75%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.0,
+          "combined": 0,
+          "text": "DEL"
+        },
+        "90%": {
+          "exact": 1,
+          "fuzzy": 1,
+          "f1": 0.8235,
+          "combined": 1,
+          "text": "DELTA-7-ZEPHYR."
+        }
+      },
+      "128": {
+        "10%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.0,
+          "combined": 0,
+          "text": "DEL"
+        },
+        "25%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.0,
+          "combined": 0,
+          "text": "DEL"
+        },
+        "50%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.0,
+          "combined": 0,
+          "text": "DEL"
+        },
+        "75%": {
+          "exact": 1,
+          "fuzzy": 1,
+          "f1": 0.8235,
+          "combined": 1,
+          "text": "DELTA-7-ZEPHYR."
+        },
+        "90%": {
+          "exact": 1,
+          "fuzzy": 1,
+          "f1": 0.8235,
+          "combined": 1,
+          "text": "DELTA-7-ZEPHYR."
+        }
+      }
+    },
+    "h2o": {
+      "64": {
+        "10%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.2857,
+          "combined": 0,
+          "text": "DELTA-7-ZERO-7-ZERO-7-ZERO-7-ZERO-7"
+        },
+        "25%": {
+          "exact": 0,
+          "fuzzy": 1,
+          "f1": 0.5333,
+          "combined": 1,
+          "text": "DELTA-7-ZERO."
+        },
+        "50%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.3571,
+          "combined": 0,
+          "text": "DELTA-7-ZEP-7-7-7-7-7-7-7"
+        },
+        "75%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.0,
+          "combined": 0,
+          "text": "DEL DEL DEL DEL DEL DEL DEL DEL DEL DEL DEL DEL DEL DEL DEL DEL DEL DEL DEL DEL"
+        },
+        "90%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.0,
+          "combined": 0,
+          "text": "DEL DEL DEL DEL DEL DEL DEL DEL DEL DEL DEL DEL DEL DEL DEL DEL DEL DEL DEL DEL"
+        }
+      },
+      "96": {
+        "10%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.4286,
+          "combined": 0,
+          "text": "DELTA-7-ZEP-DELTA-7-ZEP-DELTA-7-ZEP"
+        },
+        "25%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.4286,
+          "combined": 0,
+          "text": "DELTA-7-ZEP-DELTA-7-ZEP-DELTA-7-ZEP"
+        },
+        "50%": {
+          "exact": 0,
+          "fuzzy": 1,
+          "f1": 0.625,
+          "combined": 1,
+          "text": "DELTA-7-ZEPH-"
+        },
+        "75%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.4286,
+          "combined": 0,
+          "text": "DELTA-7-ZEP-DELTA-7-ZEP-DELTA-7-ZEP"
+        },
+        "90%": {
+          "exact": 1,
+          "fuzzy": 1,
+          "f1": 0.875,
+          "combined": 1,
+          "text": "DELTA-7-ZEPHYR"
+        }
+      },
+      "128": {
+        "10%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.4286,
+          "combined": 0,
+          "text": "DELTA-7-ZEP-DELTA-7-ZEP-DELTA-7-ZEP"
+        },
+        "25%": {
+          "exact": 0,
+          "fuzzy": 0,
+          "f1": 0.4286,
+          "combined": 0,
+          "text": "DELTA-7-ZEP-DELTA-7-ZEP-DELTA-7-ZEP"
+        },
+        "50%": {
+          "exact": 1,
+          "fuzzy": 1,
+          "f1": 0.875,
+          "combined": 1,
+          "text": "DELTA-7-ZEPHYR"
+        },
+        "75%": {
+          "exact": 1,
+          "fuzzy": 1,
+          "f1": 0.8235,
+          "combined": 1,
+          "text": "DELTA-7-ZEPHYR."
+        },
+        "90%": {
+          "exact": 1,
+          "fuzzy": 1,
+          "f1": 0.875,
+          "combined": 1,
+          "text": "DELTA-7-ZEPHYR"
+        }
+      }
+    }
+  }
+}

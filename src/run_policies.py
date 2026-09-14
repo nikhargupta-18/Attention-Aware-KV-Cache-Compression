@@ -1,8 +1,9 @@
 """
-run_policies.py  –  Phase 3.3 evaluation harness
-==================================================
+run_policies.py  –  Phase 3.3 / 3.4 evaluation harness
+=======================================================
 Demonstrates and quantitatively compares the three KV-cache eviction
-policies implemented in ``kv_cache_policies.py``.
+policies implemented in ``kv_cache_policies.py``, with Phase 3.4
+RoPE-position correction applied by default.
 
 Two evaluations
 ---------------
@@ -62,6 +63,7 @@ from kv_cache_policies import (
     SlidingWindowPolicy,
     StreamingLLMPolicy,
     H2OPolicy,
+    RoPECorrector,
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -169,16 +171,25 @@ model.eval()
 device = next(model.parameters()).device
 print("Model loaded.\n")
 
+# Phase 3.4: build the shared RoPE correction table
+rope_corrector = RoPECorrector(model, max_positions=2048)
+print("RoPE corrector built.\n")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Policy registry
 # ─────────────────────────────────────────────────────────────────────────────
+# All eviction policies now receive the RoPE corrector (Phase 3.4).
+# NoEvictionPolicy needs no corrector: cache slot == true sequence position.
 POLICIES = {
     "no_eviction"   : NoEvictionPolicy(),
-    "sliding_window": SlidingWindowPolicy(window_size=WINDOW_SIZE),
+    "sliding_window": SlidingWindowPolicy(window_size=WINDOW_SIZE,
+                                           rope_corrector=rope_corrector),
     "streaming_llm" : StreamingLLMPolicy(sink_size=SINK_SIZE,
-                                          window_size=WINDOW_SIZE),
-    "h2o"           : H2OPolicy(budget=BUDGET),
+                                          window_size=WINDOW_SIZE,
+                                          rope_corrector=rope_corrector),
+    "h2o"           : H2OPolicy(budget=BUDGET,
+                                 rope_corrector=rope_corrector),
 }
 
 # Visual style for plots
@@ -235,22 +246,28 @@ def generate_with_policy(
     generated   = [next_tok_id]
 
     # ── Decode loop ───────────────────────────────────────────────────────────
-    # ``actual_pos`` tracks the TRUE position in the full sequence.
-    # We pass this explicitly as position_ids so that RoPE is computed
-    # correctly even after eviction (cache length != true sequence length).
-    actual_pos = prefill_T   # the next token will sit at this position
+    # Phase 3.4: if policy.use_slot_positions is True, we use SLOT-BASED 
+    # position_ids so that both Q and K operate in the same contiguous 
+    # 0..budget coordinate space after eviction. Otherwise (e.g. H2O), 
+    # we use the absolute sequence position.
+    
+    actual_pos = prefill_T
 
     for _ in range(max_new_tokens - 1):
         tok_tensor = torch.tensor([[next_tok_id]], device=device)
-        pos_tensor = torch.tensor([[actual_pos]],  device=device)
+        
+        if getattr(policy, "use_slot_positions", True):
+            pos_tensor = torch.tensor([[cache.get_seq_length()]], device=device)
+        else:
+            pos_tensor = torch.tensor([[actual_pos]], device=device)
 
         with torch.no_grad():
             outputs = model(
-                input_ids     = tok_tensor,
+                input_ids       = tok_tensor,
                 past_key_values = cache,
-                use_cache     = True,
+                use_cache       = True,
                 output_attentions = True,
-                position_ids  = pos_tensor,
+                position_ids    = pos_tensor,
             )
 
         cache = policy.step(outputs.past_key_values, outputs.attentions)
@@ -313,7 +330,12 @@ def compute_nll_curve(
         )
     cache = policy.step(outputs.past_key_values, outputs.attentions)
 
-    # ── Teacher-forcing decode ────────────────────────────────────────────────
+    # ── Teacher-forcing decode (Phase 3.4: slot-based position_ids) ───────────
+    # position_ids = cache.get_seq_length() gives the next available cache slot.
+    # For NoEvictionPolicy this equals the true sequence position (no gap).
+    # For eviction policies with RoPE correction, it equals the budget (= the
+    # slot immediately after the re-indexed cache), which is the correct
+    # position in the 0..budget coordinate space.
     log_softmax = torch.nn.LogSoftmax(dim=-1)
     nll_values  = []
     end_pos     = min(T - 1, prefill_len + eval_len)
@@ -321,7 +343,11 @@ def compute_nll_curve(
     for t in range(prefill_len, end_pos):
         tok_in  = all_ids[t    ].unsqueeze(0).unsqueeze(0).to(device)   # (1,1)
         tok_tgt = all_ids[t + 1].to(device)                             # scalar
-        pos_ids = torch.tensor([[t]], device=device)
+        
+        if getattr(policy, "use_slot_positions", True):
+            pos_ids = torch.tensor([[cache.get_seq_length()]], device=device)
+        else:
+            pos_ids = torch.tensor([[t]], device=device)
 
         with torch.no_grad():
             outputs = model(
@@ -337,6 +363,7 @@ def compute_nll_curve(
         nll_values.append(-float(log_probs[tok_tgt]))
 
     return nll_values
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────

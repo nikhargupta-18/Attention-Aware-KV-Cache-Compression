@@ -1,6 +1,6 @@
 """
-kv_cache_policies.py  –  Phase 3.3
-=====================================
+kv_cache_policies.py  –  Phase 3.3 / 3.4
+==========================================
 Three pluggable KV-cache eviction policies that operate directly on the
 ``past_key_values`` object returned by a HuggingFace CausalLM.
 
@@ -38,14 +38,28 @@ Attention tensor format
 Only ``H2OPolicy`` requires attention weights; the other two policies accept
 the argument and silently ignore it.
 
-Position-ID note
-----------------
-When ``step`` evicts tokens, the cache becomes shorter than the actual
-sequence length.  The *caller* (run_policies.py) is responsible for passing
-explicit ``position_ids`` to every subsequent model forward call so that the
-new query token is placed at its *true* sequence position rather than at the
-(shorter) cache length.  This is the only way to get correct RoPE distances
-after eviction.
+Position-ID note (Phase 3.4)
+-----------------------------
+When ``step`` evicts tokens, the remaining K vectors' RoPE encodings no
+longer match their new (slot-based) relative positions.  Phase 3.4 fixes
+this via ``RoPECorrector``, which re-encodes each K vector to reflect its
+new cache-slot position.
+
+After re-encoding, **the caller must use slot-based position_ids** for
+every subsequent model forward call:
+
+    pos_ids = torch.tensor([[cache.get_seq_length()]])   # ← slot, not abs
+
+This makes both Q and K operate in the same contiguous 0..budget coordinate
+space, matching the model's training distribution exactly.
+
+Without this fix, position_ids = [[actual_sequence_pos]] keeps Q at the
+correct absolute position but leaves gaps in the K position sequence (the
+evicted middle tokens are gone but their position slots are not).  The model
+was trained on contiguous contexts; non-contiguous relative distances subtly
+corrupt attention patterns.  The degradation stays syntactically fluent but
+causes factual-recall failures — invisible without targeted needle-in-a-
+haystack evaluation (Phase 3.5).
 """
 
 import torch
@@ -67,6 +81,9 @@ def _evict_layers(cache: DynamicCache, keep_idx: torch.Tensor) -> DynamicCache:
     (a 1-D LongTensor of sorted position indices on CPU).
 
     Modifies the cache in-place and returns it.
+    Note: after this call, K vectors at new slot i still carry the RoPE
+    encoding for their OLD slot (``keep_idx[i]``).  Call
+    ``RoPECorrector.correct`` afterwards to fix them.
     """
     device = cache.layers[0].keys.device
     idx = keep_idx.to(device)
@@ -76,6 +93,164 @@ def _evict_layers(cache: DynamicCache, keep_idx: torch.Tensor) -> DynamicCache:
     return cache
 
 
+def rotate_half(x: torch.Tensor) -> torch.Tensor:
+    """
+    The 'rotate-half' operation used by Qwen2.5's RoPE.
+
+    Splits the last dimension in half and returns [-x2 | x1], which
+    implements a 90° rotation within each (x1, x2) pair:
+
+        rotate_half([a, b]) = [-b, a]
+
+    This is used in: k_encoded = k * cos + rotate_half(k) * sin
+    """
+    x1 = x[..., : x.shape[-1] // 2]
+    x2 = x[..., x.shape[-1] // 2 :]
+    return torch.cat((-x2, x1), dim=-1)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RoPE correction (Phase 3.4)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class RoPECorrector:
+    """
+    Corrects stale RoPE encodings in cached K tensors after token eviction.
+
+    The core problem
+    ─────────────────
+    When a token is written into the KV cache, its K vector is RoPE-encoded
+    at the token's *original* sequence position.  After eviction, the
+    remaining K vectors keep these original encodings — but their *effective*
+    positions in the evicted cache are now different (some earlier slots are
+    gone, so every surviving token "moves left").
+
+    If we then generate with Q at position ``cache_slot`` and K at
+    ``original_pos``, the relative distance ``Q_pos - K_pos`` is computed
+    correctly in absolute terms BUT creates a position-space gap where the
+    evicted tokens used to live.  The model was trained on contiguous
+    sequences and has never seen such gaps; the mismatch subtly corrupts
+    attention patterns.
+
+    The fix (StreamingLLM §3.3–3.4)
+    ─────────────────────────────────
+    After each eviction, re-encode every surviving K from its OLD slot
+    position to its NEW slot position (0, 1, 2, …, budget-1), so that the
+    cache always looks like a contiguous context to the model.  The query
+    then gets ``position_ids = [[cache_slot]]`` (= budget when full), and
+    both Q and K operate in the same 0..budget coordinate space.
+
+    Mathematical derivation
+    ────────────────────────
+    RoPE applies a rotation R(p) to each K at position p:
+
+        K_encoded = R(p_old) @ K_raw
+
+    To move K from p_old to p_new without access to K_raw:
+
+        K_corrected = R(p_new) @ K_raw
+                    = R(p_new) @ R(p_old)^{-1} @ K_encoded
+                    = R(p_new - p_old) @ K_encoded
+
+    In the half-split RoPE formulation used by Qwen2.5 this becomes:
+
+        K_corrected = K_encoded * cos(Δ) + rotate_half(K_encoded) * sin(Δ)
+
+    where Δ = p_new - p_old and the angle-difference identities give:
+
+        cos(Δ) = cos_new * cos_old + sin_new * sin_old
+        sin(Δ) = sin_new * cos_old - cos_new * sin_old
+
+    Incremental corrections
+    ────────────────────────
+    At steady state (cache always full), eviction removes exactly ONE token
+    per decode step.  The window tokens each shift left by one slot, so
+    Δ = -1 per step.  The numerical error from applying many small rotations
+    is negligible (each correction is a unitary transform).
+
+    Usage
+    ─────
+    ::
+        rope_corrector = RoPECorrector(model)
+        # ... after _evict_layers(cache, keep_idx) ...
+        rope_corrector.correct(cache, old_positions=keep_idx,
+                               new_positions=torch.arange(budget))
+    """
+
+    def __init__(self, model, max_positions: int = 2048):
+        """
+        Parameters
+        ----------
+        model : AutoModelForCausalLM
+            The loaded model — used to extract the shared RoPE module.
+        max_positions : int
+            Pre-compute the cos/sin table up to this many positions.
+            Must be >= the largest cache slot ever used.
+        """
+        device = next(model.parameters()).device
+
+        # Qwen2.5 stores the shared rotary embedding on model.model
+        rotary_emb = model.model.rotary_emb
+
+        # Pre-compute cos/sin for positions 0..max_positions-1
+        # pos_ids: (1, max_positions)
+        pos_ids = torch.arange(max_positions, device=device).unsqueeze(0)
+        # dummy is used only for its dtype; any shape works
+        dummy = torch.zeros(1, device=device, dtype=torch.float32)
+
+        with torch.no_grad():
+            cos, sin = rotary_emb(dummy, pos_ids)
+        # cos, sin: (1, max_positions, head_dim) with first half == second half
+        # Store on CPU; moved to device in correct() as needed
+        self.cos = cos.squeeze(0).float().cpu()  # (max_positions, head_dim)
+        self.sin = sin.squeeze(0).float().cpu()
+
+    def correct(
+        self,
+        cache: DynamicCache,
+        old_positions: torch.Tensor,
+        new_positions: torch.Tensor,
+    ) -> None:
+        """
+        In-place: recode each K vector from ``old_positions[i]`` to
+        ``new_positions[i]``.
+
+        Parameters
+        ----------
+        cache : DynamicCache
+            The cache *after* ``_evict_layers`` has already run (so the
+            K tensor at slot i came from slot ``old_positions[i]``).
+        old_positions : 1-D LongTensor, CPU
+            The slot indices that each surviving token occupied BEFORE
+            eviction.  Typically the ``keep_idx`` passed to
+            ``_evict_layers``.
+        new_positions : 1-D LongTensor, CPU
+            The contiguous slot indices to assign: ``torch.arange(budget)``.
+        """
+        if torch.equal(old_positions, new_positions):
+            return   # nothing to do — positions haven't changed
+
+        cos_old = self.cos[old_positions]   # (num_kept, head_dim)
+        sin_old = self.sin[old_positions]
+        cos_new = self.cos[new_positions]
+        sin_new = self.sin[new_positions]
+
+        # Angle-difference identity: cos(new-old) and sin(new-old)
+        cos_diff = cos_new * cos_old + sin_new * sin_old   # (num_kept, head_dim)
+        sin_diff = sin_new * cos_old - cos_new * sin_old
+
+        for layer in cache.layers:
+            k  = layer.keys.float()   # (batch, kv_heads, num_kept, head_dim)
+            dev = k.device
+
+            # Broadcast (num_kept, head_dim) → (1, 1, num_kept, head_dim)
+            cd = cos_diff.to(dev).unsqueeze(0).unsqueeze(0)
+            sd = sin_diff.to(dev).unsqueeze(0).unsqueeze(0)
+
+            # Apply: K_corrected = K * cos(Δ) + rotate_half(K) * sin(Δ)
+            layer.keys = (k * cd + rotate_half(k) * sd).to(layer.keys.dtype)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Base class
 # ─────────────────────────────────────────────────────────────────────────────
@@ -83,6 +258,12 @@ def _evict_layers(cache: DynamicCache, keep_idx: torch.Tensor) -> DynamicCache:
 class BaseKVCachePolicy:
     """Abstract base — subclasses implement ``step``."""
     name: str = "base"
+
+    # True  → caller should use slot-based position_ids (cache.get_seq_length())
+    #          and K vectors are re-encoded to contiguous slots after eviction.
+    # False → caller should use absolute sequence position_ids; K vectors
+    #          keep their original RoPE encodings (no correction applied).
+    use_slot_positions: bool = True
 
     def step(self, cache: DynamicCache, attentions=None) -> DynamicCache:
         """
@@ -136,18 +317,33 @@ class SlidingWindowPolicy(BaseKVCachePolicy):
     of long-range coreference, and early incoherence.
 
     This is your control group.  Bad results here are the point.
+
+    RoPE correction (Phase 3.4)
+    ────────────────────────────
+    Even though this policy is broken by design, RoPE correction is applied
+    when a ``rope_corrector`` is provided, for consistency.  The window
+    tokens are simply re-indexed to slots 0..window_size-1 after eviction.
     """
     name = "sliding_window"
 
-    def __init__(self, window_size: int):
+    def __init__(
+        self,
+        window_size: int,
+        rope_corrector: "RoPECorrector | None" = None,
+    ):
         """
         Parameters
         ----------
         window_size : int
             Number of most-recent K/V pairs to keep.  Everything older,
             including position 0, is discarded at each step.
+        rope_corrector : RoPECorrector | None
+            If provided, K vectors are re-encoded to slot positions 0..W-1
+            after each eviction.  The caller must then use slot-based
+            ``position_ids``.
         """
-        self.window_size = window_size
+        self.window_size    = window_size
+        self.rope_corrector = rope_corrector
 
     def step(self, cache: DynamicCache, attentions=None) -> DynamicCache:
         seq_len = _seq_len(cache)
@@ -155,6 +351,9 @@ class SlidingWindowPolicy(BaseKVCachePolicy):
             # Keep the LAST window_size positions (drop the front)
             keep = torch.arange(seq_len - self.window_size, seq_len)
             _evict_layers(cache, keep)
+            if self.rope_corrector is not None:
+                new_pos = torch.arange(self.window_size)
+                self.rope_corrector.correct(cache, keep.cpu(), new_pos)
         return cache
 
 
@@ -181,16 +380,38 @@ class StreamingLLMPolicy(BaseKVCachePolicy):
         [sink_0 … sink_{K-1} | win_{t-N} … win_{t-1} | win_t]
           ←── sink region ──→ ←──────── window region ────────→
 
+    RoPE correction (Phase 3.4)
+    ────────────────────────────
+    Without correction, the window tokens retain their original large
+    position values (e.g. positions 172..295 in a 296-token sequence) while
+    occupying slots 4..127 in the cache.  The resulting position gaps — where
+    the evicted tokens used to be — are out-of-distribution for the model.
+
+    With correction (StreamingLLM §3.3-3.4): after each eviction the
+    window tokens are re-encoded to cache slots 4..budget-1, and the query
+    receives ``position_ids = [[budget]]``.  Both Q and K now operate in
+    a contiguous 0..budget coordinate space, matching the training
+    distribution exactly.
+
+    Sink tokens (positions 0..sink_size-1) are unchanged — their slot
+    positions equal their original positions, so Δ = 0 and no rotation
+    is applied.
+
     Properties
     ──────────
     •  Fixed, content-independent — no per-token scoring or bookkeeping.
-    •  O(1) cost per decode step (two tensor slices + cat).
+    •  O(1) cost per decode step (two tensor slices + cat + RoPE correct).
     •  Predictable, bounded memory: exactly ``sink_size + window_size`` pairs.
     •  Trades long-range non-sink memory for guaranteed sink stability.
     """
     name = "streaming_llm"
 
-    def __init__(self, sink_size: int, window_size: int):
+    def __init__(
+        self,
+        sink_size: int,
+        window_size: int,
+        rope_corrector: "RoPECorrector | None" = None,
+    ):
         """
         Parameters
         ----------
@@ -199,9 +420,13 @@ class StreamingLLMPolicy(BaseKVCachePolicy):
             for most models; 1 also works for Qwen.
         window_size : int
             Number of most-recent tokens retained.
+        rope_corrector : RoPECorrector | None
+            If provided, K vectors are re-encoded to contiguous slot positions
+            after each eviction (Phase 3.4 fix).
         """
-        self.sink_size   = sink_size
-        self.window_size = window_size
+        self.sink_size      = sink_size
+        self.window_size    = window_size
+        self.rope_corrector = rope_corrector
 
     def step(self, cache: DynamicCache, attentions=None) -> DynamicCache:
         seq_len = _seq_len(cache)
@@ -213,6 +438,11 @@ class StreamingLLMPolicy(BaseKVCachePolicy):
             win_idx  = torch.arange(seq_len - self.window_size, seq_len)
             keep     = torch.cat([sink_idx, win_idx])
             _evict_layers(cache, keep)
+            if self.rope_corrector is not None:
+                # Sinks map 0→0, 1→1, … (Δ=0, no rotation)
+                # Window tokens map old_slot → 4,5,…,127 (Δ = new - old, often negative)
+                new_pos = torch.arange(budget)
+                self.rope_corrector.correct(cache, keep.cpu(), new_pos)
         return cache
 
 
@@ -256,6 +486,14 @@ class H2OPolicy(BaseKVCachePolicy):
         keep = sort(keep)                             # restore temporal order
         evict the rest; mirror eviction in score tensor
 
+    RoPE correction (Phase 3.4)
+    ────────────────────────────
+    H2O's content-adaptive eviction can produce any subset of original slot
+    indices, so the position gaps after eviction are irregular.  With
+    ``rope_corrector`` provided, the kept tokens are re-encoded to contiguous
+    slots 0..budget-1, making H2O's evicted cache as well-positioned as
+    StreamingLLM's.
+
     Properties
     ──────────
     •  Content-adaptive: positions that consistently receive high attention
@@ -266,14 +504,43 @@ class H2OPolicy(BaseKVCachePolicy):
     """
     name = "h2o"
 
-    def __init__(self, budget: int):
+    # H2O must NOT use slot-based positions.
+    #
+    # StreamingLLM re-indexes to slot positions because its eviction pattern
+    # (sink block + recency window) produces two CONTIGUOUS blocks.  Re-mapping
+    # them to 0..budget-1 creates a coherent "virtual short context" and the
+    # model attends correctly to nearby and distant tokens alike.
+    #
+    # H2O's content-adaptive eviction produces a SCATTERED, non-contiguous
+    # subset of the original sequence.  Re-indexing these scattered positions
+    # to contiguous slots 0..budget-1 would tell the model that e.g. originally-
+    # adjacent positions 45 and 67 are now only 1 slot apart (a false adjacency),
+    # corrupting relative-distance attention for all retained heavy hitters.
+    # Empirically: applying slot-based re-indexing to H2O increases NLL by
+    # ~1.2 nats (see rope_correction_eval.py results).
+    #
+    # The correct scheme for H2O: keep K vectors at their original RoPE
+    # positions and pass the true absolute sequence position as position_ids
+    # for the query.  The non-contiguous position gaps are "honest" — the model
+    # correctly computes distances to whichever tokens are actually present.
+    use_slot_positions: bool = False
+
+    def __init__(
+        self,
+        budget: int,
+        rope_corrector: "RoPECorrector | None" = None,
+    ):
         """
         Parameters
         ----------
         budget : int
             Maximum K/V pairs to keep (same limit applied across all layers).
+        rope_corrector : RoPECorrector | None
+            If provided, K vectors are re-encoded to contiguous slot positions
+            after each eviction (Phase 3.4 fix).
         """
-        self.budget = budget
+        self.budget         = budget
+        self.rope_corrector = rope_corrector
         # Shape: (num_layers, seq_len) — grows each step, shrunk after eviction.
         # CPU tensor; avoids accumulating on GPU across many steps.
         self.scores: torch.Tensor | None = None
@@ -345,7 +612,6 @@ class H2OPolicy(BaseKVCachePolicy):
             update_len = min(kv_len, seq_len)
             self.scores[l, :update_len] += score_update[:update_len].cpu()
 
-
         # ── 3.  Evict if over budget ──────────────────────────────────────────
         if seq_len <= self.budget:
             return cache   # nothing to evict yet
@@ -358,9 +624,16 @@ class H2OPolicy(BaseKVCachePolicy):
         # Restore temporal order so the model sees a causally ordered cache
         keep_idx, _ = torch.sort(keep_idx)           # ascending (CPU)
 
-        # Apply eviction to the cache tensors and to the score tensor
+        # Apply eviction to the cache tensors
         _evict_layers(cache, keep_idx)
-        self.scores = self.scores[:, keep_idx]       # mirror eviction
+
+        # Phase 3.4: correct K encodings to new contiguous slot positions
+        if self.rope_corrector is not None:
+            new_pos = torch.arange(self.budget)
+            self.rope_corrector.correct(cache, keep_idx.cpu(), new_pos)
+
+        # Mirror eviction in the score tensor
+        self.scores = self.scores[:, keep_idx]
 
         return cache
 
@@ -376,6 +649,11 @@ class NoEvictionPolicy(BaseKVCachePolicy):
     This is the performance upper bound.  Memory grows without bound during
     generation — not practical for long contexts, but sets the ceiling for
     quality comparisons.
+
+    No RoPE correction is needed: K vectors were written at positions 0, 1,
+    2, … which equal their cache-slot indices.  The query uses
+    ``position_ids = [[cache.get_seq_length()]]`` which equals the true
+    sequence length (identical to the absolute position).
     """
     name = "no_eviction"
 
